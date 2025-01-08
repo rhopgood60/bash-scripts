@@ -3,205 +3,353 @@ SCRIPTPATH="$(dirname "$(cd "${0%/*}" 2>/dev/null || exit; echo "$PWD"/"${0##*/}
 if [[ "$SCRIPTPATH" == "." ]]; then
     SCRIPTPATH="$PWD"
 fi
-PARENT_NAME=$(basename "$0" .sh)
-#echo "$SCRIPTPATH"
+#*******************************************************************************
+#
+# bash function include
+#
+#*******************************************************************************
 
-source "$SCRIPTPATH/bash_functions"
-run_once
+PSWD_HASH="9d095be844773adfc0f211b659361c57830f101024239cb93969b9266a0591cb"
+declare -a DRIVES=("Ringo"
+                   "Paul"
+                   "John"
+                   "George"
+                   "Stuart"
+                   "Pete")
+declare -A ANSICOLOUR
+ANSICOLOUR[Black]="\033[0;30m"
+ANSICOLOUR[Red]="\033[0;31m"
+ANSICOLOUR[Green]="\033[0;32m"
+ANSICOLOUR[Orange]="\033[0;33m"
+ANSICOLOUR[Blue]="\033[0;34m"
+ANSICOLOUR[Purple]="\033[0;35m"
+ANSICOLOUR[Cyan]="\033[0;36m"
+ANSICOLOUR[LTGray]="\033[0;37m"
+ANSICOLOUR[DKGray]="\033[1;30m"
+ANSICOLOUR[LTRed]="\033[1;31m"
+ANSICOLOUR[LTGreen]="\033[1;32m"
+ANSICOLOUR[Yellow]="\033[1;33m"
+ANSICOLOUR[LTBlue]="\033[1;34m"
+ANSICOLOUR[LTPurple]="\033[1;35m"
+ANSICOLOUR[LTCyan]="\033[1;36m"
+ANSICOLOUR[White]="\033[1;37m"
+ANSICOLOUR[NoColour]="\033[0m"
 
-if [ -f "$HOME/.thunderbird/xzqru2dp.default-release/lock" ]; then
-    sudo rm "$HOME/.thunderbird/xzqru2dp.default-release/lock"
-fi
-if [ -f "$HOME/.local/share/torbrowser/tbb/x86_64/tor-browser/Browser/TorBrowser/Data/Browser/profile.default/lock" ]; then
-    sudo rm "$HOME/.local/share/torbrowser/tbb/x86_64/tor-browser/Browser/TorBrowser/Data/Browser/profile.default/lock"
-fi
-if [ -f "$HOME/.local/share/torbrowser/tbb/x86_64/tor-browser/Browser/.config/ibus/bus" ]; then
-    sudo rm "$HOME/.local/share/torbrowser/tbb/x86_64/tor-browser/Browser/.config/ibus/bus"
-fi
-
-# yearly monthly weekly daily order MUST NOT change
-BACKUP_TYPES=("yearly" "monthly" "weekly" "daily")
-# Set how many backup to keep variables
-declare -A BACKUP_COUNT
-BACKUP_COUNT["yearly"]=2
-BACKUP_COUNT["monthly"]=13
-BACKUP_COUNT["weekly"]=4
-BACKUP_COUNT["daily"]=7
-#echo ${BACKUP_COUNT[@]}
-BACKUPDRIVE="George"
-
-DESTINATION="$(findmnt -lo label,target | grep "$BACKUPDRIVE" | grep -v smb)"
-DESTINATION=${DESTINATION#* }
-DESTINATION="${DESTINATION#"${DESTINATION%%[![:space:]]*}"}/Backup/$HOSTNAME/$USER"
-# Check if the destination directory is mounted
-if grep -qs "$DESTINATION" /proc/mounts; then
-    echo
-    echo "5 - Destination directory $DESTINATION is not mounted."
-    echo
-    exit 5
-fi
-# Ensure the destination directory exists
-if [ ! -d "$DESTINATION" ]; then
-    echo
-    echo "Destination directory $DESTINATION does not exist."
-    echo
-    exit 6
-fi 
-echo "DESTINATION: *$DESTINATION*"
-
-declare -a FOLDERS=(".config/torbrowser" ".config/VirtualBox" ".config/vlc" ".d1x-rebirth" ".d2x-rebirth" ".local/share/torbrowser/tbb/x86_64" ".thunderbird" ".unison" "AppData" "Audio" "bin" "Documents" "Pictures" "Setup" "Music" "Videos" "VirtualBox VMs" "vlc" ".smbcredentials")
-
-declare -a OMIT=("crashes" "datareporting" "minidumps" "saved-telemetry-pings" "lock" "bookmarkbackups" ".parentlock" "Crash Reports" "Pending Pings" "systemextensionsdev" "sessionstore-backups" "DeletedCards" "DVDFab" "ViberDownloads" "lost+found")
-
-EXCLUDE_STRING="$(IFS=" "; echo "${OMIT[*]}")"
-
-# --old-args               disable the modern arg-protection idiom
-# --archive, -a            archive mode is -rlptgoD (no -A,-X,-U,-N,-H)
-# --partial                keep partially transferred files
-# --progress               show progress during transfer
-# -P                       equivalent to --partial --progress
-# --info=progress2         option shows statistics based on the whole transfer, rather than individual file
-# --update, -u             skip files that are newer on the receiver
-# --human-readable -h
-# --delete                 delete extraneous files from dest dirs
-# --ignore-errors          delete even if there are I/O errors
-# --recursive, -r          recurse into directories
-# --stats                  give some file-transfer stats
-# --quiet, -q              suppress non-error messages
-# --relative, -R           use relative path names
-# --group, -g              preserve group
-# --owner, -o              preserve owner (super-user only)
-# --exclude=PATTERN        exclude files matching PATTERN
-# --link-dest=DIR          hardlink to files in DIR when unchanged
-RSYNCOPTIONS=(--archive
-              --partial
-              --info=progress2
-              --human-readable
-              --update
-              --delete
-              --ignore-errors
-              --recursive
-              --stats
-              --relative
-              --group
-              --mkpath
-              --owner)
-
-run_once_daily () {
-    TODAY_RAW=$(date '+%Y-%m-%d')
-    if [ -d "$DESTINATION/daily.0" ]; then
-        DAILYDATE_RAW=$(date -r "$DESTINATION/daily.0" '+%Y-%m-%d')
-        if [ "$TODAY_RAW" == "$DAILYDATE_RAW" ]; then
-            echo .
-            echo "Already successfully completed today"
-            echo .
-            exit
-        fi
+function echo_colour () { 
+    local COLOUR="${ANSICOLOUR[$(echo -n "$1" | tr -d '[:space:]')]}"
+    local TEXT="$2"
+    if [[ -n "$3" ]]; then
+        local COLOUR2="${ANSICOLOUR[$(echo -n "$3" | tr -d '[:space:]')]}"
     else
-        echo "$DESTINATION/daily.0 directory not found"
+        local COLOUR2=""
+    fi
+    
+    if [[ -z "$COLOUR" ]]; then
+        echo "Error: Invalid or empty colour key: $COLOUR"
+        return 1
+    fi
+
+    if [[ -z "$TEXT" ]]; then
+        echo -e "${COLOUR}"
+    else
+        echo -e "${COLOUR}${TEXT}${COLOUR2}"
+    fi
+}  # echo_colour
+
+function run_once() {
+    script_name="$(basename "$0")"
+
+    if pidof -o %PPID -x "$script_name" > /dev/null 2>&1; then
+        log_info "$script_name is already running"
+        exit 1
+    fi
+}  # run_once
+
+function add_apt_key() {
+    key_server="$1"
+    apt_key="$2"
+    apt_port="${3:-''}"
+
+    # Check if the key_server URL is valid
+    if [[ ! "$key_server" =~ ^hkp://.* ]]; then
+        log_error "Invalid key URL: $key_server"
+        return 1
+    fi
+
+    # Check if the key is already added
+    if sudo keyctl search "$KEYRING_NAME" "$apt_key"; then
+        log_info "Key $apt_key already exists in keyring $KEYRING_NAME"
+        return 0
+    fi
+
+    # Add the key
+    sudo apt-key adv --keyserver "$key_server""$apt_port" --recv-keys "$apt_key" || {
+        log_error "Failed to add key: $key_server"
+        return 1
+    }
+
+    # Verify the key's authenticity (optional)
+    sudo gpg --check-keys --keyring /etc/apt/trusted.gpg.d/your_keyring.gpg "$apt_key" || {
+        log_warning "Failed to verify key: $apt_key"
+    }
+
+    log_info "Key $apt_key added successfully"
+    return 0
+}  # add_apt_key
+
+function install_repository() {
+    repository_url="$1"
+
+    # Check if the repository URL is valid
+    if [[ ! "$repository_url" =~ ^"deb https?://."* ]]; then
+        log_error "Invalid repository URL: $repository_url"
+        return 1
+    fi
+
+    # Check if the repository is already added
+    if grep -q "$repository_url" /etc/apt/sources.list /etc/apt/sources.list.d/*; then
+        log_info "Repository $repository_url already present"
+        return 0
+    fi
+
+    # Add the repository
+    sudo apt-add-repository --yes --update "$repository_url" || {
+        log_error "Failed to add repository: $repository_url"
+        return 1
+    }
+
+    sudo apt update
+    log_info "Repository $repository_url added successfully"
+    return 0
+}  # install_repository
+
+function install_app() {
+    executable_name="$1"
+
+    if command -v "$executable_name" >/dev/null 2>&1; then
+        log_info "$executable_name is already installed"
+        return 0
+    fi
+
+    # Check if the package is installed with apt
+    if dpkg-query -W -f='${Status}\n' "$executable_name" 2>/dev/null | grep -q "install ok installed"; then
+        log_info "$executable_name is already installed with apt"
+        return 0
+    fi
+
+    # Check if the package is installed with flatpak
+    if flatpak list --app 2>&1 | grep -q "$executable_name"; then
+        log_info "$executable_name is already installed with flatpak"
+        return 0
+    fi
+
+    # Check if the package is installed with snap
+    if snap list 2>&1 | grep -q "$executable_name"; then
+        log_info "$executable_name is already installed with snap"
+        return 0
+    fi
+
+    # Try to install using apt
+    if sudo apt install -y "$executable_name"; then
+        log_info "$executable_name installed using apt"
+        return 0
+    fi
+
+    # Try to install using flatpak
+    if sudo flatpak install -y flathub "$executable_name"; then
+        log_info "$executable_name installed using flatpak"
+        return 0
+    fi
+
+    # Try to install using snap
+    if sudo snap install "$executable_name"; then
+        log_info "$executable_name installed using snap"
+        return 0
+    fi
+
+    log_error "Failed to install $executable_name"
+    return 1
+}  # install_app
+
+function pushd_bf() {
+    folder="$1"
+
+    pushd "$folder" > /dev/null || {
+        log_error "Failed to push directory: $folder"
+        return 1
+    }
+}  # pushd_bf
+
+function popd_bf() {
+    popd > /dev/null || {
+        log_error "Failed to pop directory"
+        return 1
+    }
+}  # popd_bf
+
+function save_IFS() {
+    old_IFS="$IFS"
+}  # save_IFS
+
+function restore_IFS() {
+    IFS="$old_IFS"
+}  # restore_IFS
+
+function ssh_open() {
+    local MACHINE="$1"
+    local TIMEOUT=5  # Adjust timeout as needed
+
+    if ssh -o ConnectTimeout=$TIMEOUT "$MACHINE" 2>/dev/null; then
+        log_info "SSH connection to $MACHINE successful"
+    else
+        log_error "Failed to connect to SSH: $MACHINE"
+        return 1
+    fi
+}  # ssh_open
+
+function starttime() {
+    STARTTIME=$(date +%s) || {
+        log_error "Failed to get start time"
+        return 1
+    }
+}
+
+function endtime() {
+    ENDTIME=$(date +%s) || {
+        log_error "Failed to get end time"
+        return 1
+    }
+}
+
+function elapsedtime() {
+    SCRIPT="${1}"
+# Check if STARTTIME and ENDTIME are set and valid numbers
+    if [[ -z "$STARTTIME" || -z "$ENDTIME" ]]; then
+        echo "Error: STARTTIME or ENDTIME not set."
+        exit 1
+    elif ! [[ "$STARTTIME" =~ ^[0-9]+$ ]] || ! [[ "$ENDTIME" =~ ^[0-9]+$ ]]; then
+        echo "Error: STARTTIME or ENDTIME are not valid numbers."
+        exit 1
+    fi
+    ELAPSEDTIME=$((ENDTIME - STARTTIME))
+    echo
+    printf '\n%s Elapsed time: %s\n' "$SCRIPT" "$(date -d@"${ELAPSEDTIME}" -u +%H:%M:%S.%3N)"
+    echo
+}
+
+function strsub() {
+    STR="$1"
+    START="$2"
+    LEN="$3"
+
+    if [[ $START -lt 1 || $LEN -lt 0 ]]; then
+        log_error "Invalid arguments for strsub: $STR, $START, $LEN"
+        return 1
+    fi
+
+    echo "${STR:$START-1:$LEN}"
+}  # strsub
+
+function strright () {
+# right_str "string" "length"
+    local STR="$1"
+    local LEN="$2"
+
+    if [[ $LEN -lt 0 ]]; then
+        log_error "Invalid arguments for strright: $STR, $LEN"
+        return 1
+    fi
+
+    echo "${STR:(-$LEN)}"
+}  # strright
+
+function strleft () {
+# left_str "string" "length"
+    local STR="$1"
+    local LEN="$2"
+
+    if [[ $LEN -lt 0 ]]; then
+        log_error "Invalid arguments for strleft: $STR, $LEN"
+        return 1
+    fi
+
+    echo "${STR:0:$LEN}"
+}  # strleft
+
+function trimright () {
+# right_str "string" "length"
+    local STR="$1"
+    local LEN="$2"
+
+    if [[ $START -lt 1 || $LEN -lt 0 ]]; then
+        log_error "Invalid arguments for trimright: $STR, $LEN"
+        return 1
+    fi
+
+    echo "${STR:0:-$LEN}"
+}  # trimright
+
+function trimleft () {
+# left_str "string" "length"
+    local STR="$1"
+    local LEN="$2"
+
+    if [[ $LEN -lt 0 ]]; then
+        log_error "Invalid arguments for trimleft: $STR, $LEN"
+        return 1
+    fi
+
+    echo "${STR:$LEN:${#STR}}"
+}  # trimleft
+
+function log_info() {
+    logger -t "$(basename $0): " "$1"
+}  # log_info
+
+function log_warning() {
+    logger -t "$(basename $0): " "$1"
+}  # log_warning
+
+function log_error() {
+    logger -t "$(basename $0): " "$1"
+}  # log_error
+
+function make_keyring() {
+    KEYRING_NAME="$(hostname)_keyring"
+    KEY_NAME="$(hostname)_pswd"
+    KEYRING_NAME="pi_keyring"
+    KEY_NAME="pi_pswd"
+
+    if sudo keyctl search "$KEYRING_NAME" "$KEY_NAME"; then
+        log_info "Keyring $KEYRING_NAME already exists."
+    else
+        sudo keyctl add keyring "$KEYRING_NAME" || {
+            log_error "Failed to create keyring: $KEYRING_NAME"
+            exit 1
+        }
+        sudo keyctl add session keyring "$KEYRING_NAME" || {
+            log_error "Failed to add keyring to session: $KEYRING_NAME"
+            exit 1
+        }
+        sudo keyctl insert "$KEYRING_NAME" "$KEY_NAME" || {
+            log_error "Failed to store password in keyring: $KEYRING_NAME"
+            exit 1
+        }
+    fi
+    unset PSWD_HASH
+    log_info "keyring created"
+}  # make_keyring
+
+function is_caps_lock () {
+    caps_lock_status=$(xset -q | sed -n 's/^.*Caps Lock:\s*\(\S*\).*$/\1/p')
+    if [[ "$caps_lock_status" == "on" ]]; then
+        echo true
+    else
+        echo false
     fi
 }
 
-# Function to check and mount the backup drive
-check_and_mount_backup_drive() {
-    if ! findmnt -lo label,target | grep "$BACKUPDRIVE" | grep -v smb > /dev/null; then
-        systemctl daemon-reload
-        mount -a 
-        if ! findmnt -lo label,target | grep "$BACKUPDRIVE" | grep -v smb > /dev/null; then
-            echo "$BACKUPDRIVE NOT found"
-            echo "Exiting $0"
-            exit
-        fi
-    fi
+function shift_caps () {
+    install_app xdotool
+    xdotool key Caps_Lock
 }
-
-move_backups () {
-echo "$FUNCNAME"
-    PERIOD="$1"
-    echo ""
-    echo "Rotating $PERIOD backups..."
-    echo ""
-        for ((i=BACKUP_COUNT["$PERIOD"] - 1; i>=0; i--)); do
-            if [ -d "$DESTINATION/$PERIOD.$i" ]; then
-                if [ "$i" -eq $(( BACKUP_COUNT["$PERIOD"] - 1 )) ]; then
-                    rm -rf "$DESTINATION/$PERIOD.$i"
-                else
-                    mv "$DESTINATION/$PERIOD.$i" "$DESTINATION/$PERIOD.$((i+1))"
-                fi
-            fi
-        done
-}
-
-shift_period () {
-echo "$FUNCNAME"
-    PERIOD="$1"
-echo ""
-echo "$DAYS_THRESHOLD"
-echo ""
-# weekly  - Check if the folder is at least 7 days ($(( BACKUP_COUNT["daily"] ))) old
-# monthly - Check if the folder is at least 28 days ($(( BACKUP_COUNT["daily"] * BACKUP_COUNT["weekly"] ))) old
-# yearly  - Check if the folder is at least 364 days ($(( BACKUP_COUNT["daily"] * BACKUP_COUNT["weekly"] * BACKUP_COUNT["monthly"] ))) old
-        if [ ! -d "$DESTINATION/$PERIOD.0" ]; then
-            mv "$BACKUP_FILE" "$DESTINATION/$PERIOD.0"
-            touch "$DESTINATION/$PERIOD.0"
-        fi
-}
-
-# Function to perform backup rotation
-rotate_backup() {
-echo "$FUNCNAME"
-echo Rotate yearly backups
-        DAYS_THRESHOLD=$(( BACKUP_COUNT["daily"] * BACKUP_COUNT["weekly"] * BACKUP_COUNT["monthly"] ))
-        BACKUP_FILE="$DESTINATION/monthly.$(( BACKUP_COUNT["monthly"] - 1 ))"
-if [[ -d "$DESTINATION/$(basename $BACKUP_FILE)" ]]; then
-#        if find "$DESTINATION" -type d -name "$(basename $BACKUP_FILE)" -print -quit | grep -q .; then
-            move_backups yearly
-            shift_period yearly
-        fi
-
-echo Rotate monthly backups
-    DAYS_THRESHOLD=$(( BACKUP_COUNT["daily"] * BACKUP_COUNT["weekly"] ))
-    BACKUP_FILE="$DESTINATION/weekly.$(( BACKUP_COUNT["weekly"] - 1 ))"
-if [[ -d "$DESTINATION/$(basename $BACKUP_FILE)" ]]; then
-#        if find "$DESTINATION" -type d -name "$(basename $BACKUP_FILE)" -mtime +"$(( DAYS_THRESHOLD - 1 ))" -print -quit | grep -q .; then
-            move_backups monthly
-            shift_period monthly
-        fi
-
-echo Rotate weekly backups
-    DAYS_THRESHOLD=$(( BACKUP_COUNT["daily"] ))
-    BACKUP_FILE="$DESTINATION/daily.$(( BACKUP_COUNT["daily"] - 1 ))"
-if [[ -d "$DESTINATION/$(basename $BACKUP_FILE)" ]]; then
-#        if find "$DESTINATION" -type d -name "weekly.0" -mtime +"$(( DAYS_THRESHOLD - 1 ))" -print -quit | grep -q .; then
-            move_backups weekly
-            shift_period weekly
-        fi
-
-echo Rotate daily backups
-    move_backups daily
-}
-
-# Check and mount backup drive
-check_and_mount_backup_drive
-
-#check if already executed
-run_once_daily
-
-#rotate backup directories
-rotate_backup
-
-# Set the linkdest option if daily.1 exists
-if [ -d "$DESTINATION/daily.1" ]; then
-    LINKDEST_OPTION="--link-dest=$DESTINATION/daily.1"
-else
-    LINKDEST_OPTION=""
-fi
-
-echo "rsync DESTINATION: $DESTINATION"
-$(which rsync)                                \
-     "${RSYNCOPTIONS[@]}"                     \
-     "$EXCLUDE_STRING"                        \
-     "${FOLDERS[@]}"                          \
-     "$DESTINATION/daily.0"                   \
-     "$LINKDEST_OPTION"
-EXITCODE=$?
