@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+if [[ -L "$0" ]]; then
+    # Script was invoked via symlink → use invocation dir
+    SCRIPTPATH="$(cd "$(dirname "$0")" && pwd)"
+else
+    # Script is real file → resolve actual location
+    if command -v realpath >/dev/null 2>&1; then
+        SCRIPTPATH="$(dirname "$(realpath "$0")")"
+    elif command -v readlink >/dev/null 2>&1 && readlink -f "$0" >/dev/null 2>&1; then
+        SCRIPTPATH="$(dirname "$(readlink -f "$0")")"
+    else
+        SCRIPTPATH="$(cd "$(dirname "$0")" && pwd)"
+    fi
+fi
+###############################################################################################
+#
+# restart selected services
+#
+#*****************************
+
+include='bash_functions'
+source_file=$(find "$HOME" \
+  \( -path "$HOME/.docker" \
+     -o -path "$HOME/docker" \
+     -o -path "$HOME/*/db" \
+     -o -path "$HOME/*/data" \) -prune -o \
+  -type f -iname "$include" -print -quit 2>/dev/null)
+if [[ -n "$source_file" ]]; then
+    source "$source_file"
+else
+    echo "❌ $include not found"
+    exit 1
+fi
+
+SERVICE="${1:-""}"
+
+declare -A SERVICES
+SERVICES["fstab"]="fstab"
+SERVICES["nfs"]="nfs"
+SERVICES["samba"]="samba"
+SERVICES["smb"]="smb"
+SERVICES["bind9"]="bind9"
+SERVICES["cron"]="cron"
+SERVICES["ssh"]="ssh"
+SERVICES["cups"]="cups"
+SERVICES["ufw"]="ufw"
+SERVICES["display"]="display"
+SERVICES["networking"]="networking" # (use with caution)
+SERVICES["winsize"]="winsize"
+
+show_usage() {
+    echo 
+    echo_colour Yellow "Usage: " 
+    echo_colour Green  "       $(basename $0) <service>"
+    echo_colour Yellow "Valid services = " 
+    echo_colour Green  "                 ${SERVICES[*]}" NoColour
+    echo 
+}
+
+check_service() {
+    if ! systemctl list-unit-files | grep -q "^$SERVICE\.service"; then
+        echo
+        echo_colour Red "$SERVICE is not available"
+        echo_colour Red "exiting" NoColour
+        show_usage
+        exit 1
+    elif ! systemctl is-enabled --quiet "$SERVICE"; then
+        echo
+        echo_colour Red "$SERVICE is not running"
+        echo_colour Red "exiting" NoColour
+        show_usage
+        exit 1
+    elif ! systemctl is-active --quiet "$SERVICE"; then
+        echo
+        echo_colour Red "$SERVICE is not enabled"
+        echo_colour Red "exiting" NoColour
+        show_usage
+        exit 1
+    fi
+}
+
+recover-display() {
+    # Reload AMD GPU driver if missing
+    # Expected resolution when amdgpu is working
+    EXPECTED_RES='2560x1080'
+    # Get current resolution from xrandr
+    CURRENT_RES=$(xrandr | awk '/\*/ {print $1; exit}')
+    echo "Current resolution: $CURRENT_RES"
+    if [[ "$CURRENT_RES" != "$EXPECTED_RES" ]]; then
+        echo "⚠️ Display has fallen back to default resolution!"
+        sudo modprobe amdgpu
+    else
+        echo "✅ Display resolution is correct."
+    fi
+}
+
+set_window_geometry() {
+    read WX WY WW WH <<< $(xprop -root _NET_WORKAREA | awk -F' = |, ' '{print $2, $3, $4, $5}')
+    
+    # Firefox
+    WIDTH=$(( $WW - 2140 ))
+    HEIGHT=$(( $WH + 50 ))
+    POS_X=$(( $WX - 24 ))
+    POS_Y=$(( $WY - 24 ))
+    for app in Firefox Thunderbird; do
+        # Find window ID by title match
+        WIN_ID=$(wmctrl -l | grep -i "$app" | awk '{print $1}')
+        if [[ -z "$WIN_ID" ]]; then
+            echo "Window not found"
+            continue
+        fi
+        STATE=$(xprop -id "$WIN_ID" _NET_WM_STATE)
+        STATE="${STATE#*= }"
+        if [[ "$STATE" == '_NET_WM_STATE' ]]; then
+            echo "Window not found"
+            continue
+        fi
+        for win in $(xdotool search --class "$app"); do
+            xdotool windowmove "$win" "$POS_X" "$POS_Y"
+            xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+        done
+        if [[ "$STATE" == '_NET_WM_STATE' ]]; then
+            wmctrl -i -r "$WIN_ID" -b add,hidden
+        fi
+    done
+
+    # Mousepad
+    WIDTH=$(( $WW - 2190 ))
+    HEIGHT=$(( $WH - 25 ))
+    POS_X=$WX
+    for app in Mousepad; do
+        for win in $(xdotool search --class "$app"); do
+            xdotool windowmove "$win" "$POS_X" "$POS_Y"
+            xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+        done
+    done
+
+    # VLC Playlist
+    WIDTH=$(( $WW - 2825 ))
+    HEIGHT=$(( $WH -700 ))
+    POS_X=$(( $WW - $WIDTH ))
+    for win in $(xdotool search --class vlc); do
+        name=$(xdotool getwindowname "$win")
+        if [[ "$name" == "Playlist" ]]; then
+            xdotool windowmove "$win" "$POS_X" "$POS_Y"
+            xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+            break
+        fi
+    done
+
+    # VLC main windows
+    WIDTH=$(( $WW - 2250 ))
+    POS_X=$(( WX + WW - WIDTH ))
+    for win in $(xdotool search --class vlc); do
+        name=$(xdotool getwindowname "$win")
+        # Skip Playlist and helper dialogs
+        if [[ "$name" == "Playlist" || "$name" == "Media Information" || "$name" == "vlc" ]]; then
+            continue
+        fi
+        # Confirm it's a normal top-level window
+        if ! xprop -id "$win" | grep -q "_NET_WM_WINDOW_TYPE_NORMAL"; then
+            continue
+        fi
+        # Require main window title ending with " - VLC media player"
+        if [[ "$name" == *" - VLC media player" ]]; then
+            xdotool windowmove "$win" "$POS_X" "$POS_Y"
+            xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+        fi
+    done
+
+    # qBittorrent
+    for win in $(xdotool search --class qBittorrent); do
+        name=$(xdotool getwindowname "$win")
+        # Require qBittorrent main window
+        if [[ "$name" == *"qBittorrent"* ]]; then
+            xdotool windowmove "$win" "$POS_X" "$POS_Y"
+            xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+        fi
+    done
+
+    # Clementine
+    HEIGHT=$(( HEIGHT - 50 ))
+    for win in $(xdotool search --onlyvisible --class Clementine); do
+        name=$(xdotool getwindowname "$win")
+
+        # Read current geometry into separate vars
+        eval "$(xdotool getwindowgeometry --shell "$win")"
+        if (( WIDTH < 100 || HEIGHT < 100 )); then
+            continue
+        fi
+        # Apply your intended geometry
+        xdotool windowmove "$win" "$POS_X" "$POS_Y"
+        xdotool windowsize "$win" "$WIDTH" "$HEIGHT"
+    done
+}  # set_window_geometry
+
+case "$SERVICE" in
+fstab        ) #check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo systemctl daemon-reload
+               sudo mount -a
+               ;;
+nfs          ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo exportfs -a
+               sudo systemctl restart nfs-kernel-server
+               ;;
+samba|smb    ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo systemctl daemon-reload
+               sudo systemctl restart smbd
+               ;;
+networking   ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo systemctl restart networking
+               ;;
+bind9        ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo systemctl restart bind
+               ;;
+cron         ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo service cron reload
+               ;;
+ssh|cups|ufw ) check_service
+               echo_colour Yellow "restarting $SERVICE" NoColour
+               sudo systemctl restart "$SERVICE"
+               ;;
+display      ) recover-display
+               ;;
+winsize|winzise ) set_window_geometry
+                  ;;
+*            ) show_usage
+               ;;
+esac
+
+#*****************************
